@@ -17,11 +17,16 @@ import logging
 import os
 import signal
 import sys
-import termios
 import threading
 import time
-import tty
 from urllib.parse import urlparse
+
+# termios/tty are POSIX-only; guard the import so the module loads on Windows.
+# Raw-mode code paths below check _POSIX before touching these names.
+_POSIX = sys.platform != "win32"
+if _POSIX:
+    import termios
+    import tty
 
 import websocket
 
@@ -132,7 +137,9 @@ def connect_console(session: SessionState):
     ws_scheme = "wss" if parsed.scheme == "https" else "ws"
     ws_url = f"{ws_scheme}://{parsed.netloc}/colab/tty?colab-runtime-proxy-token={session.token}"
 
-    is_tty = sys.stdin.isatty()
+    # Raw mode requires POSIX termios. On Windows we degrade gracefully to
+    # line-buffered I/O instead of crashing at import/reference time.
+    is_tty = sys.stdin.isatty() and _POSIX
     fd = sys.stdin.fileno() if is_tty else None
     old_settings = termios.tcgetattr(fd) if is_tty else None
 
