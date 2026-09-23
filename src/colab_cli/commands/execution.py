@@ -188,7 +188,7 @@ def exec_command(
                             {"code": cell.source, "id": cell.id, "cell": cell}
                         )
         else:
-            with open(file, "r") as f:
+            with open(file, "r", encoding="utf-8") as f:
                 code_blocks.append({"code": f.read(), "id": None})
     else:
         if is_stdin_tty():
