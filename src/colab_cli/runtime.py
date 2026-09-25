@@ -173,6 +173,15 @@ class ColabRuntime:
     ):
         self.kernel_client.restart(timeout=timeout)
 
+    def interrupt(
+        self,
+        timeout: Optional[float] = None,
+    ):
+        kwargs = {}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        self.kernel_client.interrupt(**kwargs)
+
     def execute_code(
         self,
         code: str,

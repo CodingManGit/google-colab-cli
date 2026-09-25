@@ -155,6 +155,27 @@ def test_cli_sessions_no_assignments(mock_client, mock_common_state):
     assert "No active sessions found on server." in result.output
 
 
+def test_cli_interrupt(mock_store, mock_common_state):
+    mock_session_state = MagicMock()
+    mock_session_state.name = "s1"
+    mock_session_state.url = "http://url"
+    mock_session_state.token = "token123"
+    mock_session_state.kernel_id = "kid"
+    mock_session_state.session_id = "sid"
+    mock_store.get.return_value = mock_session_state
+    mock_common_state.resolve_session.return_value = "s1"
+
+    with patch("colab_cli.commands.session.ColabRuntime") as mock_runtime_cls:
+        mock_runtime = MagicMock()
+        mock_runtime_cls.return_value = mock_runtime
+
+        result = runner.invoke(app, ["interrupt", "-s", "s1"])
+        assert result.exit_code == 0
+        assert "Interrupted kernel for session 's1'." in result.output
+        mock_runtime.interrupt.assert_called_once()
+        mock_runtime.stop.assert_called_once()
+
+
 def test_cli_status(mock_store, mock_common_state):
     mock_session_state = MagicMock()
     mock_session_state.name = "s1"

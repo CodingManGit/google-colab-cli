@@ -85,5 +85,6 @@ by running `uv tool install google-colab-cli` or `pip install google-colab-cli`.
 
 ## Recovery
 - "Session not found" / 404 / 401 on exec: the backend pruned the VM. `colab exec`/`repl` detect this and clean up local state automatically — run `colab sessions` and re-create with `colab new`.
-- Execution timeout or wedged kernel: `colab restart-kernel -s <name>` (keeps the VM, resets the kernel), or `colab stop` then `colab new`.
+- Wedged or runaway cell (infinite loop, long compilation, keep-alive loop): **`colab interrupt -s <name>`** sends an `interrupt_request` to stop the running cell while keeping the kernel and all in-memory variables/state intact.
+- Execution timeout or unrecoverable kernel crash: `colab restart-kernel -s <name>` (keeps the VM and files in `/content`, resets the kernel), or `colab stop` then `colab new`.
 - Keep-alive daemon died (`colab log` shows `keep_alive_stopped reason=consecutive_4xx_errors`): almost always the missing `colaboratory` scope — re-auth per the Authentication section.

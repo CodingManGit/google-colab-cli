@@ -338,6 +338,41 @@ def restart_kernel(
         runtime.stop()
 
 
+def interrupt_kernel(
+    session: Annotated[
+        Optional[str], typer.Option("-s", "--session", help="Session name")
+    ] = None,
+):
+    """Interrupt a running cell in a session's kernel"""
+    from colab_cli.common import state
+
+    name = state.resolve_session(session)
+    s = state.store.get(name)
+
+    def on_started(kid):
+        s.kernel_id = kid
+        state.store.add(s)
+
+    def on_sess_started(sid):
+        s.session_id = sid
+        state.store.add(s)
+
+    runtime = ColabRuntime(
+        s.url,
+        s.token,
+        kernel_id=s.kernel_id,
+        session_id=s.session_id,
+        on_kernel_started=on_started,
+        on_session_started=on_sess_started,
+    )
+
+    try:
+        runtime.interrupt()
+        typer.echo(f"[colab] Interrupted kernel for session '{name}'.")
+    finally:
+        runtime.stop()
+
+
 def sessions_command():
     """List all active sessions"""
     from colab_cli.common import state
@@ -566,6 +601,7 @@ def register(app: typer.Typer):
     app.command()(new)
     app.command(name="sessions")(sessions_command)
     app.command(name="restart-kernel")(restart_kernel)
+    app.command(name="interrupt")(interrupt_kernel)
     app.command()(status)
     app.command()(stop)
     app.command(hidden=True)(keep_alive)

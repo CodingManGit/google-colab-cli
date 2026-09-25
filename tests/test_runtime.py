@@ -131,6 +131,19 @@ def test_colab_runtime_stop():
     mock_kc._manager.client.stop_channels.assert_called_once()
 
 
+def test_colab_runtime_interrupt():
+    runtime = ColabRuntime("http://url", "token123")
+    mock_kc = MagicMock()
+    runtime._kernel_client = mock_kc
+
+    runtime.interrupt()
+    mock_kc.interrupt.assert_called_once_with()
+
+    mock_kc.reset_mock()
+    runtime.interrupt(timeout=5.0)
+    mock_kc.interrupt.assert_called_once_with(timeout=5.0)
+
+
 def test_colab_runtime_stop_exception(caplog):
     runtime = ColabRuntime("http://url", "token123")
     mock_kc = MagicMock()
