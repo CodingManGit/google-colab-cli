@@ -16,6 +16,7 @@
 execution that bundles `colab new` + `colab exec` + `colab stop`.
 """
 
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -25,9 +26,11 @@ from colab_cli.cli import app
 from colab_cli.client import (
     Accelerator,
     PostAssignmentResponse,
+    RuntimeProxyInfo,
     TooManyAssignmentsError,
     Variant,
 )
+from colab_cli.state import SessionState
 
 runner = CliRunner()
 
@@ -49,18 +52,13 @@ def mock_runtime_class(mocker):
 
 
 @pytest.fixture
-def mock_spawn_keep_alive(mocker):
-    """Don't actually spawn a daemon during tests."""
-    return mocker.patch("colab_cli.commands.run.spawn_keep_alive", return_value=12345)
-
-
-@pytest.fixture
 def assign_response():
     """A minimal PostAssignmentResponse-shaped mock for client.assign."""
     res = MagicMock()
     res.__class__ = PostAssignmentResponse
-    res.runtime_proxy_info.token = "tok"
-    res.runtime_proxy_info.url = "http://runtime"
+    res.runtime_proxy_info = RuntimeProxyInfo(
+        token="tok", tokenExpiresInSeconds=3600, url="http://runtime"
+    )
     res.endpoint = "ep-123"
     return res
 
@@ -81,7 +79,6 @@ def test_run_basic_flow(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     assign_response,
     script_path,
 ):
@@ -107,6 +104,7 @@ def test_run_basic_flow(
     assert result.exit_code == 0, result.output
     # Allocation happened
     mock_client.assign.assert_called_once()
+    assert persisted["s"].token_expires_at > datetime.now(timezone.utc)
     # Script body was executed (the prelude + body is one execute_code call)
     code_calls = [c.args[0] for c in mock_runtime.execute_code.call_args_list]
     assert any("hello from script" in code for code in code_calls), (
@@ -120,7 +118,6 @@ def test_run_high_mem_passes_shape_to_assign(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     assign_response,
     script_path,
 ):
@@ -152,7 +149,6 @@ def test_run_412_shows_friendly_error_and_exits(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     script_path,
 ):
     """A 412 from `assign` (TooManyAssignmentsError) should surface a
@@ -167,6 +163,29 @@ def test_run_412_shows_friendly_error_and_exits(
     mock_store.add.assert_not_called()
 
 
+def test_run_teardown_uses_refreshed_token(
+    mock_common_state,
+    mock_client,
+    mock_runtime_class,
+    assign_response,
+    script_path,
+):
+    """A script can outlive the proxy token, so teardown must re-fetch it."""
+    mock_client.assign.return_value = assign_response
+    mock_runtime_class.return_value.execute_code.return_value = []
+    mock_common_state.get_session.side_effect = lambda name, **_: SessionState(
+        name=name, token="fresh-tok", url="http://fresh", endpoint="ep-123"
+    )
+
+    result = runner.invoke(app, ["run", str(script_path)])
+
+    assert result.exit_code == 0, result.output
+    teardown_call = mock_runtime_class.call_args_list[-1]
+    assert teardown_call.args[:2] == ("http://fresh", "fresh-tok")
+    mock_runtime_class.return_value.stop.assert_called_with(shutdown_kernel=True)
+    mock_client.unassign.assert_called_once_with("ep-123")
+
+
 # ---------------------------------------------------------------------------
 # --keep flag
 # ---------------------------------------------------------------------------
@@ -176,7 +195,6 @@ def test_run_keep_skips_unassign(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     assign_response,
     script_path,
 ):
@@ -207,7 +225,6 @@ def test_run_passes_argv(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     assign_response,
     script_path,
 ):
@@ -242,7 +259,6 @@ def test_run_env_flag_after_script_sets_env_and_preserves_argv(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     assign_response,
     script_path,
 ):
@@ -277,7 +293,6 @@ def test_run_env_flags_accumulate_and_split_on_first_equals(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     assign_response,
     script_path,
 ):
@@ -314,7 +329,6 @@ def test_run_env_flag_escapes_tricky_literals(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     assign_response,
     script_path,
 ):
@@ -341,7 +355,6 @@ def test_run_sets_dunder_main(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     assign_response,
     script_path,
 ):
@@ -370,7 +383,6 @@ def test_run_propagates_error_exit_code(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     assign_response,
     script_path,
 ):
@@ -409,7 +421,6 @@ def test_run_unassign_called_on_exception_during_execute(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     assign_response,
     script_path,
 ):
@@ -437,7 +448,6 @@ def test_run_with_gpu_flag(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     assign_response,
     script_path,
 ):
@@ -462,7 +472,6 @@ def test_run_with_tpu_flag(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     assign_response,
     script_path,
 ):
@@ -537,7 +546,6 @@ def test_run_systemexit_zero_treated_as_success(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     assign_response,
     script_path,
     capfd,
@@ -577,7 +585,6 @@ def test_run_systemexit_nonzero_propagates_code(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     assign_response,
     script_path,
 ):
@@ -608,7 +615,6 @@ def test_run_systemexit_string_message_exits_one(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     assign_response,
     script_path,
 ):
@@ -640,7 +646,6 @@ def test_run_prelude_suppresses_ipython_exit_warning(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     assign_response,
     script_path,
 ):
@@ -670,7 +675,6 @@ def test_run_with_timeout_flag(
     mock_client,
     mock_store,
     mock_runtime_class,
-    mock_spawn_keep_alive,
     assign_response,
     script_path,
 ):
