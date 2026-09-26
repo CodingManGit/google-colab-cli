@@ -113,7 +113,13 @@ def save_output(outputs, cell):
 def display_output(out, output_image=None):
     if out.get("output_type") == "stream":
         stream = sys.stderr if out.get("name") == "stderr" else sys.stdout
-        stream.write(out.get("text", ""))
+        text = out.get("text", "")
+        try:
+            stream.write(text)
+        except UnicodeEncodeError:
+            # Fallback for Windows consoles bound to non-UTF8 code pages (e.g. cp1252)
+            safe_text = text.encode(stream.encoding or "ascii", errors="replace").decode(stream.encoding or "ascii")
+            stream.write(safe_text)
         stream.flush()
     elif "data" in out:
         data = out["data"]
