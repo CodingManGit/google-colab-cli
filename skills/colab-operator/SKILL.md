@@ -36,9 +36,26 @@ by running `uv tool install google-colab-cli` or `pip install google-colab-cli`.
   https://www.googleapis.com/auth/colaboratory
   ```
   Why all four: `userinfo.email` (session backend `colab.research.google.com`, else 401), `colaboratory` (Colab features/APIs), `openid`+`cloud-platform` (mandated by gcloud itself; it rejects scope lists missing `cloud-platform`).
-- **oauth2 setup**: `colab --auth=oauth2 <anything>` triggers a browser consent flow on first use (token cached at `~/.config/colab-cli/token.json`). Requires a client config at `~/.colab-cli-oauth-config.json` (or `-c PATH`). The browser step means it usually needs a human; prefer ADC for agents.
+- **oauth2 setup**: `colab --auth=oauth2 <anything>` triggers a browser consent flow on first use (token cached at `~/.config/colab-cli/token.json`). Requires a client config at `~/.colab-cli-oauth-config.json` (or `-c PATH`).
+  - **CRITICAL (PKCE & Agent Non-Blocking Invariant)**: The CLI's OAuth2 flow uses **PKCE (`code_challenge` / `code_verifier`)** via `InstalledAppFlow`. The local CLI process prints the authorization URL and waits at `input("Enter the authorization code: ")`. The `code_verifier` is stored **only in that active process memory**.
+  - **The Dead Code Trap**: If an agent runs `colab` synchronously and times out or interrupts the terminal while waiting for the code, **the process dies and the `code_verifier` is permanently lost**. The code copied from the browser becomes invalid and Google will reject it with `400: Missing code verifier`.
+  - **Correct Agent Flow**:
+    1. Always launch the login command (`colab --auth=oauth2 status`) in **`mode="async"`** (non-blocking).
+    2. Read the authorization URL from the terminal output and provide it to the user.
+    3. Keep that exact terminal process alive in the background.
+    4. When the user provides the code, use `send_to_terminal` to send it into the waiting process.
+  - **Verification trap**: `colab ls` when no sessions exist only inspects local `sessions.json` and does NOT make backend calls. Never use `colab ls` to verify auth. Always use `colab status` or `colab whoami` to force backend verification.
 - **Verify auth in one shot**: `colab sessions` (read-only, lists server assignments) or `colab whoami` (hidden debug command: prints the active email, scopes, audience, and expiry). When any call 401s or 403s, the cause is almost always missing credentials or scopes — `colab whoami` shows it instantly.
 - **Do NOT confuse `colab auth` with CLI authentication.** `colab auth` injects *VM-side* GCP credentials into the running kernel (so notebook code can call BigQuery/GCS); it is orthogonal to how the CLI itself authenticates. Never suggest "run `colab auth`" to fix a CLI 401/403 — that's a scope/identity problem fixed via the `gcloud` command above.
+- **GCS Access & Pass-Through Auth**:
+  - The CLI's OAuth token (`~/.config/colab-cli/token.json`) already includes the `https://www.googleapis.com/auth/cloud-platform` scope.
+  - To authorize VM-side `gcloud storage cp` or Python `google-cloud-storage` without interactive login on the VM, pass the token into the VM via `--env CLOUDSDK_AUTH_ACCESS_TOKEN=<token>`.
+  - **IAM Permission Check**: Having `cloud-platform` scope only grants API reachability; the logged-in Google account must explicitly possess `roles/storage.objectViewer` or `roles/storage.admin` on the target GCS bucket. If you get `403 storage.objects.list denied`, verify bucket-level IAM or use `project` with owner rights.
+  - **STRICT CO-LOCATION INVARIANT (NEVER CROSS-REGION TRANSFER)**:
+    - Never transfer across regions between Colab and GCS (incurs egress fees and bandwidth penalties).
+    - Always verify the VM compute zone matches the target bucket before data transfer.
+    - If the VM lands in the wrong region, stop the session and retry up to 3 times. If still unmatched after 3 attempts, abort GCS staging and fallback to alternative staging (e.g. `HF_HUB_ENABLE_HF_TRANSFER=1`).
+  - **HF Transfer Fallback**: For public models, `HF_HUB_ENABLE_HF_TRANSFER=1` provides 280–320 MB/s line-rate downloads, serving as an instant fallback when GCS permissions are pending or co-location cannot be met.
 
 ## Workflow
 
