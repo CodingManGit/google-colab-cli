@@ -37,7 +37,6 @@ the ``X-Colab-Ssh-Pubkey`` header. RSA keys are rejected by the server, so
 import contextlib
 import os
 from pathlib import Path
-import select
 import shlex
 import signal
 import subprocess
@@ -358,11 +357,12 @@ def _bridge_proxy_mode(ws: websocket.WebSocket) -> int:
     stdin_fd = sys.stdin.buffer.fileno()
 
     def stdin_to_ws():
+        # NOTE(Windows-support branch): the original implementation used
+        # ``select.select([stdin_fd], ...)``, which raises ``OSError`` on
+        # Windows where WinSock ``select`` only accepts sockets. A blocking
+        # ``os.read`` is portable and behaviorally identical for this bridge.
         try:
             while True:
-                ready, _, _ = select.select([stdin_fd], [], [], None)
-                if not ready:
-                    continue
                 data = os.read(stdin_fd, 8192)
                 if not data:
                     break
