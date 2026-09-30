@@ -107,7 +107,42 @@ def test_get_session_unknown_name_exits(real_state, capsys):
 
     assert exc.value.exit_code == 1
     assert "Session 'nope' not found." in capsys.readouterr().out
-    real_state.client.list_assignments.assert_not_called()
+    # The name is unknown locally, but get_session still probes assignments
+    # once to attempt a rebuild (prune-race recovery). With nothing live the
+    # rebuild declines and the command fails as before.
+    real_state.client.list_assignments.assert_called_once()
+
+
+def test_get_session_rebuilds_lost_record_from_single_assignment(real_state):
+    # The local store lost the record (stale-endpoint prune race or a
+    # sessions.json read/write race) while the assignment is alive server-side.
+    # Exactly one live assignment -> no ambiguity: rebuild the record.
+    real_state.client.list_assignments.return_value = [_assignment("ep9", "fresh-token")]
+
+    s = real_state.get_session("s1")
+
+    assert s.endpoint == "ep9"
+    assert s.token == "fresh-token"
+    assert s.url == "https://new-url"
+    persisted = real_state.store.get("s1")
+    assert persisted is not None
+    assert persisted.token == "fresh-token"
+    assert persisted.endpoint == "ep9"
+
+
+def test_get_session_rebuild_declined_without_exactly_one_assignment(real_state):
+    # Zero live assignments -> nothing to rebuild from.
+    real_state.client.list_assignments.return_value = []
+    assert real_state.get_session("s1", ignore_missing_session=True) is None
+
+    # Two or more live assignments -> ambiguous which one the name refers to;
+    # the rebuild must decline rather than guess.
+    real_state.client.list_assignments.return_value = [
+        _assignment("ep1", "t1"),
+        _assignment("ep2", "t2"),
+    ]
+    assert real_state.get_session("s1", ignore_missing_session=True) is None
+    assert real_state.store.get("s1") is None
 
 
 def test_get_session_unknown_name_ignored(real_state):

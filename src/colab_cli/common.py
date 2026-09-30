@@ -83,6 +83,40 @@ class State:
             del self._sessions[name]
         self.history.log_event(name, "session_terminated", {"reason": "pruned"})
 
+    def _rebuild_from_assignments(self, name: str) -> Optional[SessionState]:
+        """Rebuild a lost local record from the live server assignment.
+
+        The local store can lose a record while the assignment is still alive
+        server-side: stale-endpoint pruning during sync_sessions, or a
+        read/write race on sessions.json (a reader arriving mid-truncate sees
+        an empty file and _load_raw returns {}). With exactly one live
+        assignment there is no ambiguity about which session the name refers
+        to, so the record is reconstructed (fresh proxy token included) instead
+        of failing the command.
+        """
+        try:
+            assignments = self.client.list_assignments()
+        except SystemExit:
+            return None
+        if len(assignments) != 1:
+            return None
+        a = assignments[0]
+        s = SessionState(
+            name=name,
+            token="",
+            url="",
+            endpoint=a.endpoint,
+            variant=str(a.variant),
+            accelerator=str(a.accelerator),
+            machine_shape=str(a.machine_shape),
+        )
+        _apply_proxy_info(s, a.runtime_proxy_info)
+        self.store.add(s)
+        self.history.log_event(
+            name, "session_store_rebuilt", {"endpoint": a.endpoint}
+        )
+        return s
+
     def get_session(
         self, name: str, ignore_missing_session: bool = False
     ) -> Optional[SessionState]:
@@ -94,6 +128,8 @@ class State:
         returns None.
         """
         s = self.store.get(name)
+        if s is None:
+            s = self._rebuild_from_assignments(name)
         if s and (
             not s.token_expires_at
             or s.token_expires_at - datetime.now(timezone.utc) <= TOKEN_REFRESH_MARGIN

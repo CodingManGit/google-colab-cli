@@ -260,7 +260,9 @@ def interrupt_kernel(
     from colab_cli.common import state
 
     name = state.resolve_session(session)
-    s = state.store.get(name)
+    # get_session (not raw store.get): rebuilds the record if the local store
+    # lost it to a prune race while the assignment is still alive.
+    s = state.get_session(name)
 
     def on_started(kid):
         s.kernel_id = kid

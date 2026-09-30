@@ -1,5 +1,6 @@
 ---
 log:
+2026-09-30: Missing local session records are now rebuilt from the live server assignment instead of failing the command. `State.get_session` (and `colab interrupt`, which now calls it instead of raw `store.get`) recovers when the local store lost a record to a stale-endpoint prune race or a `sessions.json` read/write race while the assignment is still alive: with exactly one live assignment there is no ambiguity, so the record is reconstructed with a fresh proxy token (logged as `session_store_rebuilt`); zero or multiple assignments decline the rebuild and the command fails as before.
 2026-09-25: Runtime proxy tokens are now refreshed before expiry. `SessionState` persists `token_expires_at`, and `State.get_session` re-fetches the token via `GET /tun/m/assignments` when it's within 5 minutes of expiring.
 2026-09-25: Removed the keep-alive background daemon and related client/CLI ping functions. VM liveness is automatically maintained by the Colab backend based on kernel activity.
 2026-08-10: Added `colab usage` for account-level compute-unit rate/balance via `GET /tun/m/ccu-info` on the session backend (same bearer token as `colab new`).
