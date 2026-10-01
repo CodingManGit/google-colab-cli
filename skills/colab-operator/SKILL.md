@@ -54,8 +54,8 @@ by running `uv tool install google-colab-cli` or `pip install google-colab-cli`.
   - **STRICT CO-LOCATION INVARIANT (NEVER CROSS-REGION TRANSFER)**:
     - Never transfer across regions between Colab and GCS (incurs egress fees and bandwidth penalties).
     - Always verify the VM compute zone matches the target bucket before data transfer.
-    - If the VM lands in the wrong region, stop the session and retry up to 3 times. If still unmatched after 3 attempts, abort GCS staging and fallback to alternative staging (e.g. `HF_HUB_ENABLE_HF_TRANSFER=1`).
-  - **HF Transfer Fallback**: For public models, `HF_HUB_ENABLE_HF_TRANSFER=1` provides 280–320 MB/s line-rate downloads, serving as an instant fallback when GCS permissions are pending or co-location cannot be met.
+    - If the VM lands in the wrong region, stop the session and retry up to 3 times. If still unmatched after 3 attempts, abort GCS staging and fallback to alternative staging (e.g. the HF Xet engine: `huggingface_hub[hf_xet]` + `HF_XET_HIGH_PERFORMANCE=1`).
+  - **HF Xet Fallback**: For public models, the Xet engine (`huggingface_hub[hf_xet]` + `HF_XET_HIGH_PERFORMANCE=1`) provides 350–375 MB/s line-rate downloads, serving as an instant fallback when GCS permissions are pending or co-location cannot be met. NOTE: `HF_HUB_ENABLE_HF_TRANSFER`/`hf_transfer` is deprecated as of `huggingface_hub` 2.0. For repo-to-repo weight copies use server-side `huggingface_hub.copy_files` — never relay bytes through a VM.
 
 ## Workflow
 
