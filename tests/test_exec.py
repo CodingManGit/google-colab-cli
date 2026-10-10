@@ -235,7 +235,9 @@ def test_cli_exec_outputs(
     mock_runtime.execute_code.side_effect = mock_execute_code
 
     result = runner.invoke(app, ["exec", "-s", "s1"], input="do_stuff()")
-    assert result.exit_code == 0
+    # An uncaught kernel exception must surface as OUR exit code (was silently 0
+    # before, which made every orchestrator see a crashed script as success).
+    assert result.exit_code == 1
 
     mock_handle_image.assert_any_call("png_data", "image/png", target_path=None)
     mock_handle_image.assert_any_call("jpeg_data", "image/jpeg", target_path=None)
@@ -299,3 +301,75 @@ def test_cli_exec_timeout(mock_store, mock_runtime_class, mock_common_state, tmp
     mock_runtime.execute_code.assert_any_call(
         "print('hello')", output_hook=ANY, timeout=3600.0
     )
+
+
+def _kernel_error(ename: str, evalue: str = "") -> dict:
+    return {
+        "output_type": "error",
+        "ename": ename,
+        "evalue": evalue,
+        "traceback": [f"{ename}: {evalue}\n"],
+    }
+
+
+def _prime_session(mock_store, mock_common_state):
+    mock_session = MagicMock()
+    mock_session.name = "s1"
+    mock_session.url = "http://url"
+    mock_session.token = "token"
+    mock_session.kernel_id = None
+    mock_session.session_id = None
+    mock_store.get.return_value = mock_session
+    mock_common_state.resolve_session.return_value = "s1"
+
+
+def test_cli_exec_kernel_exception_exits_1(
+    mock_store, mock_runtime_class, mock_common_state
+):
+    """An uncaught kernel exception must fail `colab exec` (it was rc=0)."""
+    _prime_session(mock_store, mock_common_state)
+    mock_runtime = mock_runtime_class.return_value
+    mock_runtime.execute_code.return_value = [
+        _kernel_error(
+            "FileNotFoundError",
+            "[Errno 2] No such file or directory: '/content/logs/x.log'",
+        )
+    ]
+
+    result = runner.invoke(app, ["exec", "-s", "s1"], input="open('/content/logs/x.log')")
+    assert result.exit_code == 1
+
+
+def test_cli_exec_systemexit_code_passthrough(
+    mock_store, mock_runtime_class, mock_common_state
+):
+    """`sys.exit(N)` in a VM script exits N, like `python script.py`."""
+    _prime_session(mock_store, mock_common_state)
+    mock_runtime = mock_runtime_class.return_value
+    mock_runtime.execute_code.return_value = [_kernel_error("SystemExit", "3")]
+
+    result = runner.invoke(app, ["exec", "-s", "s1"], input="raise SystemExit(3)")
+    assert result.exit_code == 3
+
+
+def test_cli_exec_keyboardinterrupt_maps_to_130(
+    mock_store, mock_runtime_class, mock_common_state
+):
+    """`colab interrupt` (Rule 10) is deliberate — 130, not a script failure."""
+    _prime_session(mock_store, mock_common_state)
+    mock_runtime = mock_runtime_class.return_value
+    mock_runtime.execute_code.return_value = [_kernel_error("KeyboardInterrupt")]
+
+    result = runner.invoke(app, ["exec", "-s", "s1"], input="time.sleep(999)")
+    assert result.exit_code == 130
+
+
+def test_cli_exec_clean_cell_still_exits_0(
+    mock_store, mock_runtime_class, mock_common_state
+):
+    _prime_session(mock_store, mock_common_state)
+    mock_runtime = mock_runtime_class.return_value
+    mock_runtime.execute_code.return_value = [{"output_type": "stream", "text": "ok\n"}]
+
+    result = runner.invoke(app, ["exec", "-s", "s1"], input="print('ok')")
+    assert result.exit_code == 0

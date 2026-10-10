@@ -116,6 +116,9 @@ def test_integration_loop_interrupted_by_cli_interrupt(
 
     assert len(exec_results) == 1
     exec_res = exec_results[0]
-    assert exec_res.exit_code == 0
+    # A deliberate `colab interrupt` surfaces as 130 (shell SIGINT convention),
+    # NOT 0 — the caller decides whether an interrupt is acceptable. Host-side
+    # orchestration treats 130 as non-fatal (colabcli.OK_EXIT_CODES).
+    assert exec_res.exit_code == 130
     assert "KeyboardInterrupt" in exec_res.output
     session_runtime_instance.interrupt.assert_called_once()

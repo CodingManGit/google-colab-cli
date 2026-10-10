@@ -143,6 +143,58 @@ def display_output(out, output_image=None):
         pass
 
 
+def _is_systemexit(out) -> bool:
+    """True iff this output is a `raise SystemExit(...)` (a.k.a. `sys.exit`)."""
+    return out.get("output_type") == "error" and out.get("ename") == "SystemExit"
+
+
+def _systemexit_code(out) -> int:
+    """Map a SystemExit kernel output back to a CPython-style integer exit code.
+
+    CPython conventions (mirrored):
+      - `sys.exit()` / `sys.exit(None)` / `sys.exit(0)` -> 0
+      - `sys.exit(<int>)`                                -> <int>
+      - `sys.exit('msg')` (any non-int)                  -> 1
+    """
+    evalue = (out.get("evalue") or "").strip()
+    if evalue in ("", "None", "0"):
+        return 0
+    try:
+        return int(evalue)
+    except ValueError:
+        return 1
+
+
+def _exit_code_from_outputs(outputs) -> int:
+    """Derive the CLI's exit code from a cell's kernel outputs.
+
+    A `SystemExit` is treated like CPython would treat the same call from a
+    plain `python script.py` invocation. `KeyboardInterrupt` — a deliberate
+    `colab interrupt` (our Rule 10 non-destructive escape hatch) — is 130, as
+    in a shell. Any *other* uncaught exception is 1.
+
+    Single source of truth: `colab run` imports these helpers too. Before this
+    existed for `exec`, a raised VM-side exception (e.g. FileNotFoundError
+    while opening a server log) exited 0 and every orchestrator's `check=True`
+    saw success — run 20261004-044125 summarized a crashed launch as SUCCESS.
+    """
+    code = 0
+    for o in outputs:
+        if o.get("output_type") != "error":
+            continue
+        ename = o.get("ename", "")
+        if _is_systemexit(o):
+            ec = _systemexit_code(o)
+            # Last SystemExit wins, matching the runtime — and any non-zero
+            # eclipses any prior zero.
+            code = ec if ec != 0 else code
+        elif ename == "KeyboardInterrupt":
+            code = 130
+        else:
+            return 1
+    return code
+
+
 def exec_command(
     session: Annotated[
         Optional[str], typer.Option("-s", "--session", help="Session name")
@@ -232,6 +284,7 @@ def exec_command(
             raise typer.Exit(1)
         raise e
 
+    exit_code = 0
     try:
         is_nb = file and file.endswith(".ipynb")
         s.running = f"exec({file or 'stdin'})"
@@ -266,6 +319,11 @@ def exec_command(
                 output_hook=lambda o: display_output(o, output_image),
                 timeout=timeout,
             )
+            block_code = _exit_code_from_outputs(outputs)
+            if block_code and not exit_code:
+                # First non-zero kernel code wins; later blocks still run
+                # (notebook semantics: every cell executes).
+                exit_code = block_code
             if "cell" in block:
                 save_output(outputs, block["cell"])
             state.history.log_event(
@@ -287,6 +345,11 @@ def exec_command(
             typer.echo(f"[colab] Saving notebook with outputs to '{output_file}'...")
             with open(output_file, "w", encoding="utf-8") as f:
                 nbformat.write(nb, f)
+
+    # The kernel's own failure must become OUR exit code — otherwise every
+    # orchestrator's `check=True` sees success on a crashed VM-side script.
+    if exit_code != 0:
+        raise typer.Exit(exit_code)
 
 
 def repl(
