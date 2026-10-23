@@ -25,6 +25,7 @@ import io
 import shlex
 import subprocess
 import sys
+import threading
 from unittest.mock import MagicMock
 
 from colab_cli.cli import app
@@ -235,6 +236,49 @@ def test_bridge_proxy_mode_pumps_ws_to_stdout(mocker):
     ws.close.assert_called()
 
 
+def test_bridge_proxy_mode_pumps_stdin_to_ws(mocker):
+    """os.read() chunks leave as binary frames; EOF ends the pump and closes
+    the socket.
+
+    Regression test: the pump used select() on the stdin fd before reading.
+    Windows select() only accepts sockets, so there the OSError killed the
+    pump thread and the remote side saw no input at all; a plain blocking
+    read works on every platform.
+    """
+    reads = iter([b"ping ", b"hello", b""])
+    stdin_eof = threading.Event()
+
+    def fake_read(fd, size):
+        chunk = next(reads)
+        if not chunk:
+            stdin_eof.set()
+        return chunk
+
+    mocker.patch("sys.stdin")
+    sys.stdin.buffer.fileno.return_value = 0
+    mocker.patch.object(ssh_module.os, "read", side_effect=fake_read)
+    fake_stdout = MagicMock()
+    fake_stdout.buffer = io.BytesIO()
+    mocker.patch("sys.stdout", fake_stdout)
+
+    # Hold the ws->stdout loop until the pump has drained stdin, so the
+    # send_binary assertions below can't race the reader thread.
+    def recv_data(control_frame):
+        stdin_eof.wait(timeout=5)
+        return (websocket.ABNF.OPCODE_CLOSE, b"")
+
+    ws = MagicMock()
+    ws.recv_data.side_effect = recv_data
+
+    rc = ssh_module._bridge_proxy_mode(ws)
+    assert rc == 0
+    assert [call.args[0] for call in ws.send_binary.call_args_list] == [
+        b"ping ",
+        b"hello",
+    ]
+    ws.close.assert_called()
+
+
 # --- ProxyCommand shell quoting ---------------------------------------------
 
 
@@ -262,13 +306,14 @@ def test_bridge_proxy_mode_pumps_ws_to_stdout(mocker):
 @pytest.mark.parametrize(
     "identity", [None, "/k/id ed25519"], ids=["no-identity", "identity-space"]
 )
-def test_proxy_command_round_trips_through_the_shell(name, identity):
+def test_proxy_command_round_trips_through_the_shell(name, identity, mocker):
     """The ProxyCommand string must re-parse into the exact argv.
 
     `ssh` hands the ProxyCommand to /bin/sh, so every argument has to survive
     word-splitting verbatim -- a hostile session name must arrive as one
     literal argument, never as a new word or a substitution.
     """
+    mocker.patch.object(ssh_module.sys, "platform", "linux")
     cmd = ssh_module._proxy_command(_make_session(name=name), identity)
     argv = shlex.split(cmd)
 

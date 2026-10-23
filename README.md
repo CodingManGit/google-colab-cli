@@ -48,7 +48,7 @@ Run a CPU-based VM runtime, execute some code, and clean up:
 colab new
 
 # 2. Execute code from stdin
-echo "print('Hello from Google Colab!')" | colab exec
+echo 'print("Hello from Google Colab!")' | colab exec
 
 # 3. Stop and release the VM resource
 colab stop
@@ -190,3 +190,9 @@ To view interactive walkthroughs of eleven real-world automated scenarios, check
 ## Contributing
 
 Feedback and contributions are welcome! Please read [`CONTRIBUTING.md`](./CONTRIBUTING.md) for details.
+
+---
+
+## Legal & Privacy
+
+See Colab's [Terms of Service](https://research.google.com/colaboratory/tos_v6.html) and the [Google Privacy Policy](https://policies.google.com/privacy), which apply to usage of this CLI.

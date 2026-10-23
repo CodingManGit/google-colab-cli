@@ -102,11 +102,18 @@ def run_automation(
                 state.history.log_event(s.name, "drive_auth_needed", {"uri": uri})
                 sys.stdout.write("Press Enter after you have granted access... ")
                 sys.stdout.flush()
-                if sys.platform == "win32":
-                    input()  # /dev/tty does not exist on Windows; stdin works
-                else:
+                try:
                     with open("/dev/tty") as tty:
                         tty.readline()
+                except (FileNotFoundError, OSError, IOError):
+                    # Windows has no /dev/tty; fall back to stdin.
+                    try:
+                        sys.stdin.readline()
+                    except Exception:
+                        try:
+                            input()
+                        except Exception:
+                            pass
 
             typer.echo("[colab] Authorizing VM...")
             params["dryrun"] = "false"
