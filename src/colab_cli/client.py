@@ -208,6 +208,9 @@ class Client:
                 params = {}
             params["authuser"] = "0"
 
+        if "timeout" not in kwargs:
+            kwargs["timeout"] = 300
+
         request_headers = headers.copy() if headers else {}
         request_headers[ACCEPT_JSON_HEADER["key"]] = ACCEPT_JSON_HEADER["value"]
         request_headers[COLAB_CLIENT_AGENT_HEADER["key"]] = COLAB_CLIENT_AGENT_HEADER[
