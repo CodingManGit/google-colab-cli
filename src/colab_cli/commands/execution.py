@@ -276,6 +276,7 @@ def exec_command(
             "import os; os.makedirs('/content', exist_ok=True); os.chdir('/content')"
         )
     except Exception as e:
+        runtime.stop()
         if is_terminal_error(e):
             typer.echo(
                 f"[colab] Session '{name}' appears to be lost (404/401). Cleaning up."
@@ -388,6 +389,7 @@ def repl(
             "import os; os.makedirs('/content', exist_ok=True); os.chdir('/content')"
         )
     except Exception as e:
+        runtime.stop()
         if is_terminal_error(e):
             typer.echo(
                 f"[colab] Session '{name}' appears to be lost (404/401). Cleaning up."
